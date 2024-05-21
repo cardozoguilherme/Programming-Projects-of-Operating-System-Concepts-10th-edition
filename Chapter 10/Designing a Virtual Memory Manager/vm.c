@@ -197,7 +197,7 @@ void update_tlb(int page_number, int frame_number, int tlb_entry) {
     TLB[tlb_entry].occupied = 1;
 }
 
-void check_tlb(Address *address_head, Frame *frame_head) {
+void check_tlb(Address *address_head, Frame *frame_head, FILE *output_file) {
     Address *current_address = address_head;
     int page_number_to_check;
     while (current_address != NULL) {
@@ -221,7 +221,7 @@ void check_tlb(Address *address_head, Frame *frame_head) {
             int offset = current_address->offset;
             int physical_address = physical_address_calculator(frame_number, offset);
             int value = value_calculator(frame_head, frame_number, offset);
-            printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, tlb_index, physical_address, value);
+            fprintf(output_file, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, tlb_index, physical_address, value);
         } else { // TLB miss
             if (page_table[page_number_to_check] < 0) { // Page fault
                 page_fault_counter++;
@@ -231,7 +231,7 @@ void check_tlb(Address *address_head, Frame *frame_head) {
             int offset = current_address->offset;
             int physical_address = physical_address_calculator(frame_number, offset);
             int value = value_calculator(frame_head, frame_number, offset);
-            printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, next_tlb_entry, physical_address, value);
+            fprintf(output_file, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, next_tlb_entry, physical_address, value);
 
             update_tlb(page_number_to_check, frame_number, next_tlb_entry); 
             next_tlb_entry = (next_tlb_entry + 1) % TLB_SIZE;
@@ -271,17 +271,25 @@ int main() {
     Address *address_head = NULL;
     Frame *frame_head = NULL;
 
+    FILE *output_file;
+    output_file = fopen("output.txt", "w"); // TODO: Cuidado aqui, lembrar de mudar para o nome solicitado
+
+    if (output_file == NULL) {
+        printf("Error: could not write output file\n");
+        return 0;
+    }
+
     init_page_table();
     init_physical_memory(&frame_head);
     init_tlb();
     extract_page_number_and_offset(&address_head);
-    check_tlb(address_head, frame_head);
+    check_tlb(address_head, frame_head, output_file);
 
-    printf("Number of Translated Addresses = %d\n", total_translated_addresses);
-    printf("Page Faults = %d\n", page_fault_counter);
-    printf("Page Fault Rate = %.3f\n", (float) page_fault_counter / total_translated_addresses);
-    printf("TLB Hits = %d\n", tlb_hit_counter);
-    printf("TLB Hit Rate = %.3f\n", (float) tlb_hit_counter / total_translated_addresses);
+    fprintf(output_file, "Number of Translated Addresses = %d\n", total_translated_addresses);
+    fprintf(output_file, "Page Faults = %d\n", page_fault_counter);
+    fprintf(output_file, "Page Fault Rate = %.3f\n", (float) page_fault_counter / total_translated_addresses);
+    fprintf(output_file, "TLB Hits = %d\n", tlb_hit_counter);
+    fprintf(output_file, "TLB Hit Rate = %.3f\n", (float) tlb_hit_counter / total_translated_addresses);
 
     while (address_head != NULL) {
         Address *temp = address_head;
@@ -295,5 +303,7 @@ int main() {
         free(temp);
     }
     
+    fclose(output_file);
+
     return 0;
 }
