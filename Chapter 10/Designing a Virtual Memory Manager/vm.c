@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_ADDRESS_LENGTH 10 // Coloquei mais do que a length apenas para testar
+#define MAX_ADDRESS_LENGTH 10
 
 #define PAGE_NUMBER_BITS 8
 #define OFFSET_BITS 8
@@ -12,6 +12,8 @@
 
 #define PAGE_SIZE 256
 #define FRAME_SIZE PAGE_SIZE
+
+#define TLB_SIZE 16
 
 int page_table[NUMBER_OF_PAGES];
 
@@ -23,23 +25,32 @@ typedef struct Address {
     struct Address *next;
 } Address;
 
-// Physical memory frames
 typedef struct Frame {
-    char data[PAGE_SIZE]; // 256
-    int occupied; // 0 false, 1 true
+    char data[PAGE_SIZE];
+    int occupied;
     int frame_number;
 
     struct Frame *next;
 } Frame;
 
+typedef struct TLB_elements {
+    int page_number;
+    int frame_number;
+    int occupied;
+} TLB_elements;
+
+TLB_elements TLB[TLB_SIZE];
+
 int page_fault_counter = 0;
 int next_victim_frame = 0;
 int total_translated_addresses = 0;
+int tlb_hit_counter = 0;
+int next_tlb_entry = 0;
 
 void insert_address(Address **address_head, int virtual_address, int page_number, int offset) {
     Address *new = (Address *)malloc(sizeof(Address));
 
-    if(new != NULL) {
+    if (new != NULL) {
         new->virtual_address = virtual_address;
         new->page_number = page_number;
         new->offset = offset;
@@ -47,7 +58,6 @@ void insert_address(Address **address_head, int virtual_address, int page_number
 
         if (*address_head == NULL) {
             *address_head = new;
-
         } else {
             Address *temp = *address_head;
 
@@ -63,7 +73,7 @@ void insert_address(Address **address_head, int virtual_address, int page_number
 void create_frame(Frame **frame_head, char data[], int occupied, int frame_number) {
     Frame *new = (Frame *)malloc(sizeof(Frame));
 
-    if(new != NULL) {
+    if (new != NULL) {
         memcpy(new->data, data, PAGE_SIZE * sizeof(char));
         new->occupied = occupied;
         new->frame_number = frame_number;
@@ -85,9 +95,8 @@ void create_frame(Frame **frame_head, char data[], int occupied, int frame_numbe
 
 void init_physical_memory(Frame **head) {
     char initial_data[PAGE_SIZE];
-    memset(initial_data, 0, PAGE_SIZE * sizeof(char)); // Inicializa com 0 os primeiros 256 bytes de cada Frame
+    memset(initial_data, 0, PAGE_SIZE * sizeof(char));
 
-    // 128 frames (0 to 127)
     for (int i = 0; i < PHYSICAL_MEMORY_FRAMES; i++) {
         create_frame(head, initial_data, 0, i);
     }
@@ -99,16 +108,23 @@ void init_page_table() {
     }
 }
 
+void init_tlb() {
+    for (int i = 0; i < TLB_SIZE; i++) {
+        TLB[i].page_number = -1;
+        TLB[i].frame_number = -1;
+        TLB[i].occupied = 0;
+    }
+}
+
 int select_victim_frame_fifo() {
-    // If all frames are ocuppied
     if (next_victim_frame >= PHYSICAL_MEMORY_FRAMES) {
-        next_victim_frame = 0; // Reset
+        next_victim_frame = 0;
     }
     
     int temporary_victim_frame = next_victim_frame;
     next_victim_frame++;
     
-    return temporary_victim_frame; // Returns victim frame
+    return temporary_victim_frame;
 }
 
 void load_page_into_frame(Frame *head, int victim_frame, int page_number) {
@@ -124,14 +140,14 @@ void load_page_into_frame(Frame *head, int victim_frame, int page_number) {
     int previous_page = -1;
 
     while (current_frame != NULL) {
-        if(current_frame->frame_number == victim_frame) {
+        if (current_frame->frame_number == victim_frame) {
             fseek(backing_store, page_number * PAGE_SIZE, SEEK_SET);
             fread(current_frame->data, sizeof(char), PAGE_SIZE, backing_store);
             
-            // Marcar o frame como ocupado
+            // Marks the frame as occupied
             current_frame->occupied = 1;
 
-            // Verifica se existe uma página associada ao frame
+            // Checks if there is a page associated with the frame
             for (int i = 0; i < NUMBER_OF_PAGES; i++) {
                 if (page_table[i] == victim_frame) {
                     previous_page = i;
@@ -139,11 +155,11 @@ void load_page_into_frame(Frame *head, int victim_frame, int page_number) {
                 }
             }
 
-            // Se existe uma página associada ao frame
+            // If there is a page associated with the frame
             if (previous_page != -1) {
-                page_table[previous_page] = -1; // Invalida a página anterior
+                page_table[previous_page] = -1;
             }
-            page_table[page_number] = victim_frame;
+            page_table[page_number] = victim_frame; // Invalidates the previous page
 
             break;
         }
@@ -161,58 +177,70 @@ void handle_page_fault(Frame *frame_head, int page_number) {
 
 int physical_address_calculator(int frame_number, int offset) {
     return (frame_number << OFFSET_BITS) | offset;
-
-
 }
 
 int value_calculator(Frame *frame_head, int frame_number, int offset) {
     int value;
     while (frame_head != NULL) {
         if (frame_head->frame_number == frame_number) {
-            value = frame_head->data[offset];
-
+            value = (signed char) frame_head->data[offset];
             break;
         }
         frame_head = frame_head->next;
     }
-
     return value;
 }
 
-void check_page_table(Address *address_head, Frame *frame_head) {
+void update_tlb(int page_number, int frame_number, int tlb_entry) {
+    TLB[tlb_entry].page_number = page_number;
+    TLB[tlb_entry].frame_number = frame_number;
+    TLB[tlb_entry].occupied = 1;
+}
+
+void check_tlb(Address *address_head, Frame *frame_head) {
     Address *current_address = address_head;
     int page_number_to_check;
     while (current_address != NULL) {
         page_number_to_check = current_address->page_number;
         
-        // Page fault
-        if (page_table[page_number_to_check] < 0) {
-            page_fault_counter++;
-            handle_page_fault(frame_head, page_number_to_check);
-    
-            int frame_number = page_table[page_number_to_check];
+        int tlb_hit = 0;
+        int tlb_index = -1;
+        int frame_number = -1;
+        for (int i = 0; i < TLB_SIZE; i++) {
+            if (TLB[i].page_number == page_number_to_check) {
+                tlb_hit = 1;
+                tlb_hit_counter++;
+                frame_number = TLB[i].frame_number;
+                tlb_index = i;
+                break;
+            }
+        }
+
+        // TLB hit
+        if (tlb_hit == 1) { 
             int offset = current_address->offset;
             int physical_address = physical_address_calculator(frame_number, offset);
-            
             int value = value_calculator(frame_head, frame_number, offset);
-
-            // printf("Virtual address: %d Physical address: %d\n", current_address->virtual_address, physical_address);
-            printf("Virtual address: %d Physical address: %d Value: %d\n", current_address->virtual_address, physical_address, value);
-        } else { // No page fault
-            int frame_number = page_table[page_number_to_check];
+            printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, tlb_index, physical_address, value);
+        } else { // TLB miss
+            if (page_table[page_number_to_check] < 0) { // Page fault
+                page_fault_counter++;
+                handle_page_fault(frame_head, page_number_to_check);
+            }
+            frame_number = page_table[page_number_to_check];
             int offset = current_address->offset;
             int physical_address = physical_address_calculator(frame_number, offset);
-
             int value = value_calculator(frame_head, frame_number, offset);
+            printf("Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, next_tlb_entry, physical_address, value);
 
-            // printf("Virtual address: %d Physical address: %d\n", current_address->virtual_address, physical_address);
-            printf("Virtual address: %d Physical address: %d Value: %d\n", current_address->virtual_address, physical_address, value);
+            update_tlb(page_number_to_check, frame_number, next_tlb_entry); 
+            next_tlb_entry = (next_tlb_entry + 1) % TLB_SIZE;
         }
 
         current_address = current_address->next;
     }
 }
-    
+
 void extract_page_number_and_offset(Address **head) {
     FILE *addresses_file;
     addresses_file = fopen("addresses.txt", "r"); // TODO: Cuidado aqui, lembrar de arrumar pois o nome não necessariamente vai ser esse
@@ -220,13 +248,12 @@ void extract_page_number_and_offset(Address **head) {
 
     if (addresses_file == NULL) {
         printf("Error: could not open addresses file\n");
-
         return;
     }
 
     char address_line[MAX_ADDRESS_LENGTH];
     
-    while(fgets(address_line, sizeof(address_line), addresses_file)) {
+    while (fgets(address_line, sizeof(address_line), addresses_file)) {
         virtual_address = atoi(address_line);
         
         int page_number, offset;
@@ -246,12 +273,15 @@ int main() {
 
     init_page_table();
     init_physical_memory(&frame_head);
+    init_tlb();
     extract_page_number_and_offset(&address_head);
-    check_page_table(address_head, frame_head);
+    check_tlb(address_head, frame_head);
 
     printf("Number of Translated Addresses = %d\n", total_translated_addresses);
     printf("Page Faults = %d\n", page_fault_counter);
     printf("Page Fault Rate = %.3f\n", (float) page_fault_counter / total_translated_addresses);
+    printf("TLB Hits = %d\n", tlb_hit_counter);
+    printf("TLB Hit Rate = %.3f\n", (float) tlb_hit_counter / total_translated_addresses);
 
     while (address_head != NULL) {
         Address *temp = address_head;
