@@ -272,7 +272,7 @@ int main() {
     Frame *frame_head = NULL;
 
     FILE *output_file;
-    output_file = fopen("output.txt", "w"); // TODO: Cuidado aqui, lembrar de mudar para o nome solicitado
+    output_file = fopen("correct.txt", "w"); // TODO: Cuidado aqui, lembrar de mudar para o nome solicitado
 
     if (output_file == NULL) {
         printf("Error: could not write output file\n");
