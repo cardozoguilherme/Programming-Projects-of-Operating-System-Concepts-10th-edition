@@ -1,11 +1,8 @@
 CC = gcc
 CFLAGS = -Wall -Wextra
 
-vm: vm.o
-	$(CC) $(CFLAGS) -o vm vm.o
-
-vm.o: vm.c
-	$(CC) $(CFLAGS) -c vm.c
+vm: vm.c
+	$(CC) $(CFLAGS) -o vm vm.c
 
 clean:
-	rm -f vm vm.o
+	rm -f vm
