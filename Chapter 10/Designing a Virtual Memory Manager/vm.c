@@ -44,17 +44,14 @@ typedef struct Address
     int virtual_address;
     int page_number;
     int offset;
-
     struct Address *next;
 } Address;
 
 typedef struct Frame
 {
     char data[PAGE_SIZE];
-    int occupied;
     int frame_number;
     int last_used;
-
     struct Frame *next;
 } Frame;
 
@@ -62,7 +59,6 @@ typedef struct TLB_elements
 {
     int page_number;
     int frame_number;
-    int occupied;
 } TLB_elements;
 
 TLB_elements TLB[TLB_SIZE];
@@ -77,7 +73,6 @@ int current_time = 0;
 void insert_address(Address **address_head, int virtual_address, int page_number, int offset)
 {
     Address *new = (Address *)malloc(sizeof(Address));
-
     if (new != NULL)
     {
         new->virtual_address = virtual_address;
@@ -92,7 +87,6 @@ void insert_address(Address **address_head, int virtual_address, int page_number
         else
         {
             Address *temp = *address_head;
-
             while (temp->next != NULL)
             {
                 temp = temp->next;
@@ -102,14 +96,12 @@ void insert_address(Address **address_head, int virtual_address, int page_number
     }
 }
 
-void create_frame(Frame **frame_head, char data[], int occupied, int frame_number)
+void create_frame(Frame **frame_head, char data[], int frame_number)
 {
     Frame *new = (Frame *)malloc(sizeof(Frame));
-
     if (new != NULL)
     {
         memcpy(new->data, data, PAGE_SIZE * sizeof(char));
-        new->occupied = occupied;
         new->frame_number = frame_number;
         new->last_used = 0;
         new->next = NULL;
@@ -121,7 +113,6 @@ void create_frame(Frame **frame_head, char data[], int occupied, int frame_numbe
         else
         {
             Frame *temp = *frame_head;
-
             while (temp->next != NULL)
             {
                 temp = temp->next;
@@ -133,12 +124,10 @@ void create_frame(Frame **frame_head, char data[], int occupied, int frame_numbe
 
 void init_physical_memory(Frame **head)
 {
-    char initial_data[PAGE_SIZE];
-    memset(initial_data, 0, PAGE_SIZE * sizeof(char));
-
+    char initial_data[PAGE_SIZE] = {0};
     for (int i = 0; i < PHYSICAL_MEMORY_FRAMES; i++)
     {
-        create_frame(head, initial_data, 0, i);
+        create_frame(head, initial_data, i);
     }
 }
 
@@ -156,7 +145,6 @@ void init_tlb()
     {
         TLB[i].page_number = -1;
         TLB[i].frame_number = -1;
-        TLB[i].occupied = 0;
     }
 }
 
@@ -166,11 +154,7 @@ int select_victim_frame_fifo()
     {
         next_victim_frame = 0;
     }
-
-    int temporary_victim_frame = next_victim_frame;
-    next_victim_frame++;
-
-    return temporary_victim_frame;
+    return next_victim_frame++;
 }
 
 int select_victim_frame_lru(Frame *head)
@@ -195,11 +179,9 @@ int select_victim_frame_lru(Frame *head)
 void load_page_into_frame(Frame *head, int victim_frame, int page_number)
 {
     FILE *backing_store = fopen("BACKING_STORE.bin", "rb");
-
     if (backing_store == NULL)
     {
         printf("Error: could not open backing storage file\n");
-
         return;
     }
 
@@ -212,7 +194,6 @@ void load_page_into_frame(Frame *head, int victim_frame, int page_number)
         {
             fseek(backing_store, page_number * PAGE_SIZE, SEEK_SET);
             fread(current_frame->data, sizeof(char), PAGE_SIZE, backing_store);
-            current_frame->occupied = 1;
             current_frame->last_used = current_time++;
 
             for (int i = 0; i < NUMBER_OF_PAGES; i++)
@@ -220,7 +201,6 @@ void load_page_into_frame(Frame *head, int victim_frame, int page_number)
                 if (page_table[i] == victim_frame)
                 {
                     previous_page = i;
-
                     break;
                 }
             }
@@ -252,7 +232,6 @@ void handle_page_fault(Frame *frame_head, int page_number, char *replacement_alg
     else
     {
         printf("Error: unknown replacement algorithm\n");
-
         return;
     }
     load_page_into_frame(frame_head, victim_frame, page_number);
@@ -273,7 +252,6 @@ int value_calculator(Frame *frame_head, int frame_number, int offset)
         if (frame_head->frame_number == frame_number)
         {
             value = (signed char)frame_head->data[offset];
-
             break;
         }
         frame_head = frame_head->next;
@@ -285,7 +263,6 @@ void update_tlb(int page_number, int frame_number, int tlb_entry)
 {
     TLB[tlb_entry].page_number = page_number;
     TLB[tlb_entry].frame_number = frame_number;
-    TLB[tlb_entry].occupied = 1;
 }
 
 void check_tlb(Address *address_head, Frame *frame_head, FILE *output_file, char *replacement_algorithm)
@@ -318,16 +295,13 @@ void check_tlb(Address *address_head, Frame *frame_head, FILE *output_file, char
             int physical_address = physical_address_calculator(frame_number, offset);
             int value = value_calculator(frame_head, frame_number, offset);
             fprintf(output_file, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, tlb_index, physical_address, value);
-            // fprintf(output_file, "Virtual address: %d Physical address: %d Value: %d\n", current_address->virtual_address, physical_address, value);
 
             Frame *current_frame = frame_head;
-
             while (current_frame != NULL)
             {
                 if (current_frame->frame_number == frame_number)
                 {
                     current_frame->last_used = current_time++;
-
                     break;
                 }
                 current_frame = current_frame->next;
@@ -346,19 +320,16 @@ void check_tlb(Address *address_head, Frame *frame_head, FILE *output_file, char
             int physical_address = physical_address_calculator(frame_number, offset);
             int value = value_calculator(frame_head, frame_number, offset);
             fprintf(output_file, "Virtual address: %d TLB: %d Physical address: %d Value: %d\n", current_address->virtual_address, next_tlb_entry, physical_address, value);
-            // fprintf(output_file, "Virtual address: %d Physical address: %d Value: %d\n", current_address->virtual_address, physical_address, value);
 
             update_tlb(page_number_to_check, frame_number, next_tlb_entry);
             next_tlb_entry = (next_tlb_entry + 1) % TLB_SIZE;
 
             Frame *current_frame = frame_head;
-
             while (current_frame != NULL)
             {
                 if (current_frame->frame_number == frame_number)
                 {
                     current_frame->last_used = current_time++;
-
                     break;
                 }
                 current_frame = current_frame->next;
@@ -376,7 +347,6 @@ void extract_page_number_and_offset(Address **head, char *address_file)
     if (addresses_file == NULL)
     {
         printf("Error: could not open addresses file\n");
-
         return;
     }
 
@@ -399,7 +369,6 @@ int main(int argc, char *argv[])
     if (argc != 3)
     {
         printf("Usage: %s <address_file> <replacement_algorithm>\n", argv[0]);
-
         return 1;
     }
 
@@ -410,11 +379,9 @@ int main(int argc, char *argv[])
     Frame *frame_head = NULL;
 
     FILE *output_file = fopen("correct.txt", "w");
-
     if (output_file == NULL)
     {
         printf("Error: could not write output file\n");
-
         return 0;
     }
 
@@ -445,6 +412,5 @@ int main(int argc, char *argv[])
     }
 
     fclose(output_file);
-
     return 0;
 }
